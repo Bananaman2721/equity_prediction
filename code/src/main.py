@@ -1,19 +1,39 @@
-from model import pipeline
+# Imports
+import sys
+import time
+from datetime import date
+from neuralforecast.losses.pytorch import DistributionLoss
+from model.pipeline import workflow
 
-# 7. Parameters
-train_ratio=0.99
-feature_window=60
-target_window=1
-lead_time_window=0
-result_path='/Users/zhang_family_mac/Yongqiang/stock_prediction/result'
+import warnings
+if not sys.warnoptions:
+    warnings.simplefilter("ignore")
 
-# 8. Main function
+# Parameters
+# data
+stage = 'train'
+start_date = '2000-01-01'
+end_date = date.today()
+horizon = 5
+stocks = ['^GSPC', '^IXIC', '^DJI', 'GOOG', 'AAPL', 'TSLA', 'MSFT', 'NVDA', 'AMD', 'META', 'AMZN', 'NFLX', 'BTC-USD']
+metrics = ['close', 'change', 'direction']
+
 def main():
-    pipeline.workflow_train(train_ratio=train_ratio,
-                   feature_window=feature_window,
-                   target_window=target_window,
-                   lead_time_window=lead_time_window,
-                   result_path=result_path)
-
-if __name__ == '__main__':
+    start = time.time()
+    for stock in stocks:
+        for metric_column in metrics:
+            for stage in ['train', 'predict', 'forecast']:
+                workflow(stage,
+                         stock,
+                         start_date,
+                         end_date,
+                         metric_column,
+                         horizon=horizon)
+    end = time.time()
+    print(
+        f"Total time elapsed (in minutes): "
+        + "{:.2f}".format((end - start) / 60.0)
+    )
+    
+if __name__ == "__main__":
     main()

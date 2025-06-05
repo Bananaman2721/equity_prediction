@@ -14,48 +14,109 @@ from keras.layers import *
 import pickle
 
 from data.data_preprocessing import *
-from model.LSTM import *
-from model.feature_engineering import *
+from model.neural_forecast import *
 
-if not sys.warnoptions:
-    import warnings
+def workflow(stage,
+             stock,
+             start_date,
+             end_date,
+             metric_column,
+             horizon=5):
 
-    warnings.simplefilter("ignore")
+    # Parameters
+    date_column = 'date'
+    id_column = 'stock'
+    threshold = 0.9
+    
+    frequency = 'D'
+    input_size = 48
+    hidden_size = 20
+    loss = DistributionLoss(distribution='StudentT', level=[80, 90]) # 'Poisson', 'Normal'
+    learning_rate = 0.05
+    stat_exog_list = []
+    hist_exog_list = ['open', 'high', 'low', 'volume', 'holiday', 'month_2', 'month_3', 'month_4', 'month_5', 'month_6', 'month_7', 'month_8', 'month_9', 'month_10', 'month_11', 'month_12', 'weekday_1', 'weekday_2', 'weekday_3', 'weekday_4'] #, 'weekend']
+    futr_exog_list = ['holiday', 'month_2', 'month_3', 'month_4', 'month_5', 'month_6', 'month_7', 'month_8', 'month_9', 'month_10', 'month_11', 'month_12', 'weekday_1', 'weekday_2', 'weekday_3', 'weekday_4'] #, 'weekend']
+    max_steps = 500
+    val_check_steps = 10
+    early_stop_patience_steps = 10
+    scaler_type = 'robust'
+    windows_batch_size = 16
+    enable_progress_bar = True
+    encoder_hidden_size = 64
+    decoder_hidden_size = 64
+    n_freq_downsample = [2, 1, 1]
+    llm = 'gpt2'
+    prompt_prefix = "The dataset contains data on daily stock price. There is a weekly, monthly and yearly seasonality."
+    batch_size = 16
+    valid_batch_size = 16
+    result_path = '../../result/' + stock + '/' + metric_column + '/' + str(horizon) + '/'
 
-# 6. Workflow
-def workflow_train(data_freq='60s', train_ratio=1.0, feature_window=60, target_window=1, lead_time_window=0, result_path=None):
-    from numpy.random import seed
-    seed(1)
-    import tensorflow
-    tensorflow.random.set_seed(2)
+    # Query data
+    df = query_data(stock,
+                    start_date,
+                    end_date)
 
-    df = read_data()
-    scaler, df_reframed = feature_engineering(df, stage='TRAIN', model=None, feature_window=feature_window, target_window=target_window, lead_time_window=lead_time_window)
-    train_X, train_y, test_X, test_y = split_data(df_reframed, train_ratio=train_ratio, target_window=target_window)
-    train_X = reshape(train_X, feature_window)
-    encoder, forecaster = train(train_X, train_y, target_window=target_window)
-    if train_ratio < 1.0:
-        test_X = reshape(test_X, feature_window)
-        y_pred_encoder = predict(encoder, test_X)
-        y_pred_forecaster = predict(forecaster, y_pred_encoder)
-        evaluate(y_pred_forecaster, test_y)
-    model = {'scaler': scaler, 'encoder': encoder, 'forecaster': forecaster}
-    pickle.dump(model, open(os.path.join(result_path, 'model.pkl'), 'wb'))
+    # Get TA indicators
+    # df = TA_analysis(df)
+    
+    # Get correlated stocks
+    correlated_stocks = get_correlated_stocks(df, 
+                                              date_column=date_column,
+                                              metric_column=metric_column,
+                                              id_column=id_column,
+                                              threshold=threshold)
 
-    return model
+    # Build models: forecasting model and stack model
+    iterations = 1
+    if stage == 'train': # Train the forecasting and stack models
+        iterations = int(90/horizon)
 
+    df_result = None
+    df_local = df.copy()
+    for i in range(iterations):
+        df_train, df_test, hist_exog_list_extra = prepare_data(df_local,
+                                                               horizon,
+                                                               stock,
+                                                               correlated_stocks[stock],
+                                                               stage=stage,
+                                                               date_column=date_column,
+                                                               metric_column=metric_column,
+                                                               id_column=id_column)
+        forecast_model = train(df_train,
+                               horizon=horizon,
+                               frequency=frequency,
+                               input_size=input_size,
+                               hidden_size=hidden_size,
+                               loss=loss,
+                               learning_rate=learning_rate,
+                               stat_exog_list=stat_exog_list,
+                               futr_exog_list=futr_exog_list,
+                               hist_exog_list=hist_exog_list + hist_exog_list_extra,
+                               max_steps=max_steps,
+                               val_check_steps=val_check_steps,
+                               early_stop_patience_steps=early_stop_patience_steps,
+                               scaler_type=scaler_type,
+                               windows_batch_size=windows_batch_size,
+                               enable_progress_bar=enable_progress_bar,
+                               encoder_hidden_size=encoder_hidden_size,
+                               decoder_hidden_size=decoder_hidden_size,
+                               n_freq_downsample=n_freq_downsample,
+                               llm=llm,
+                               prompt_prefix=prompt_prefix,
+                               batch_size=batch_size,
+                               valid_batch_size=valid_batch_size,
+                               result_path=result_path)
+    
+        df_result = stack_data(forecast_model,
+                               df_train,
+                               df_test,
+                               df_result)
 
-def workflow_predict(df, model):
-    from numpy.random import seed
-    seed(1)
-    import tensorflow
-    tensorflow.random.set_seed(2)
+        df_local = df_local[df_local['date'] < df_local['date'].values[-horizon]]
 
-    _, test_X = feature_engineering(df, stage='PREDICT', model=model)
-    test_X = reshape(test_X.values, feature_window=60)
-    print("after reshape: ", test_X)
-    y_pred_encoder = predict(model['encoder'], test_X)
-    print("After encoder: ", y_pred_encoder)
-    y_pred_forecaster = predict(model['forecaster'], y_pred_encoder)
-    print("After forecaster: ", y_pred_forecaster)
-    return y_pred_forecaster
+    result = stack(df_result,
+                   metric_column,
+                   stage=stage,
+                   result_path=result_path)
+    
+    return result
