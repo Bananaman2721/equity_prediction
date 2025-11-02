@@ -42,7 +42,7 @@ app.layout = html.Div(
                         html.A(
                             html.Img(
                                 className="logo",
-                                src=app.get_asset_url("dash-logo.png"),
+                                src=app.get_asset_url("equity_forecasting.png"),
                             ),
                             # href="https://plotly.com/dash/",
                         ),
@@ -253,5 +253,5 @@ def forecast(n,
 
 
 if __name__ == '__main__':
-    app.run_server(debug=True)
+    app.run(debug=True)
 
