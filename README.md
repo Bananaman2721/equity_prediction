@@ -45,8 +45,11 @@ There are two ways to run the stock forecasting
  - Python code: python code/src/main.py
 
 ### 4. Stock forecasting through App UI
-Run python code/src/app/app.py from commandline, a webserver with the stock forecasting application will be started. Then you can access the web
+Run python app.py from commandline, a webserver with the stock forecasting application will be started. Then you can access the web
 interface to get stock data, technical indicators and perform stock forecasting. By default, here is the web address: http://127.0.0.1:8050/
+
+Here is the user interface:
+![User Interface Example](user_interface.png)
 
 ## Goal
 
